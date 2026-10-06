@@ -21,8 +21,10 @@ header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-sp
 .list .sub{color:var(--mut);font-size:13px;margin-top:2px}
 .list a.continue{border-color:#3d6b3d}
 .list.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
-.list.grid a{display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;margin:0;padding:8px;text-align:center;font-size:12px;line-height:1.3;overflow:hidden;word-break:break-word}
+.list.grid a{display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;aspect-ratio:1;margin:0;padding:8px;text-align:center;font-size:12px;line-height:1.3;overflow:hidden;word-break:break-word}
 .list.grid a .sub{font-size:11px;margin-top:4px}
+.list.grid a.read{color:var(--mut)}
+.list.grid a.read::after{content:"读完";position:absolute;top:3px;right:4px;font-size:10px;line-height:1;color:#6c9}
 .ghead{color:var(--mut);font-size:13px;font-weight:600;margin:18px 4px 6px}
 .ghead:first-child{margin-top:4px}
 .reader img{display:block;width:100%;height:auto;margin:0 auto;background:#000}
@@ -79,6 +81,9 @@ async function list(segs){
 function go(segs){ location.hash = '/' + segs.map(enc).join('/'); }
 function getLast(){ try { const o = JSON.parse(localStorage.getItem('manga:last')); return (o && typeof o.series === 'string' && typeof o.chapter === 'string') ? o : null; } catch { return null; } }
 function setLast(series, chapter){ try { localStorage.setItem('manga:last', JSON.stringify({series, chapter})); } catch {} }
+function getRead(){ try { return JSON.parse(localStorage.getItem('manga:read')) || {}; } catch { return {}; } }
+function isRead(s, c){ return getRead()[s + '\n' + c] === 1; }
+function markRead(s, c){ try { const m = getRead(); if (m[s + '\n' + c] !== 1){ m[s + '\n' + c] = 1; localStorage.setItem('manga:read', JSON.stringify(m)); } } catch {} }
 function renderToggles(){
   $('mode').textContent = getMode() === 'page' ? '单页' : '连续';
   $('dir').textContent  = getDir() === 'rtl' ? '右→左' : '左→右';
@@ -126,7 +131,8 @@ async function renderSeries(series){
       h += `<div class="ghead">${GROUPLABEL[k]}</div><div class="list grid">`;
       for (const n of groups[k].sort(nat)){
         const done = last && last.series === series && last.chapter === n;
-        h += `<a class="${done ? 'continue' : ''}" title="${esc(n)}" href="#/${enc(series)}/${enc(n)}">${esc(n)}${done ? '<div class="sub">上次读到</div>' : ''}</a>`;
+        const read = isRead(series, n);
+        h += `<a class="${read ? 'read' : done ? 'continue' : ''}" title="${esc(n)}" href="#/${enc(series)}/${enc(n)}">${esc(n)}${!read && done ? '<div class="sub">上次读到</div>' : ''}</a>`;
       }
       h += '</div>';
     }
@@ -164,6 +170,8 @@ function renderScroll(fromPage){
   bp.onclick = () => navChapter(-1); bn.onclick = () => navChapter(1);
   if (fromPage != null && app.querySelectorAll('.reader img')[fromPage]) app.querySelectorAll('.reader img')[fromPage].scrollIntoView({block:'center'});
   else scrollTo(0, 0);
+  const imgs = app.querySelectorAll('.reader img');
+  if (imgs.length) new IntersectionObserver((es, ob) => { if (es[0].isIntersecting){ markRead(cur.series, cur.chapter); ob.disconnect(); } }, {threshold:.5}).observe(imgs[imgs.length - 1]);
 }
 
 function renderPages(){
@@ -223,8 +231,10 @@ function showPage(n){
 }
 
 function nextPage(){
-  if (cur.page < cur.imgs.length - 1) showPage(cur.page + 1);
-  else navChapter(1, 0);
+  if (cur.page < cur.imgs.length - 1){
+    showPage(cur.page + 1);
+    if (cur.page === cur.imgs.length - 1) markRead(cur.series, cur.chapter);
+  } else navChapter(1, 0);
 }
 function prevPage(){
   if (cur.page > 0) showPage(cur.page - 1);
