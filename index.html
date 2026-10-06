@@ -20,6 +20,9 @@ header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-sp
 .list a:hover{border-color:var(--acc)}
 .list .sub{color:var(--mut);font-size:13px;margin-top:2px}
 .list a.continue{border-color:#3d6b3d}
+.list.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
+.list.grid a{display:flex;flex-direction:column;align-items:center;justify-content:center;aspect-ratio:1;margin:0;padding:8px;text-align:center;font-size:12px;line-height:1.3;overflow:hidden;word-break:break-word}
+.list.grid a .sub{font-size:11px;margin-top:4px}
 .ghead{color:var(--mut);font-size:13px;font-weight:600;margin:18px 4px 6px}
 .ghead:first-child{margin-top:4px}
 .reader img{display:block;width:100%;height:auto;margin:0 auto;background:#000}
@@ -120,10 +123,10 @@ async function renderSeries(series){
     let h = '';
     for (const k of GROUPS){
       if (!groups[k].length) continue;
-      h += `<div class="ghead">${GROUPLABEL[k]}</div><div class="list">`;
+      h += `<div class="ghead">${GROUPLABEL[k]}</div><div class="list grid">`;
       for (const n of groups[k].sort(nat)){
         const done = last && last.series === series && last.chapter === n;
-        h += `<a class="${done ? 'continue' : ''}" href="#/${enc(series)}/${enc(n)}">${esc(n)}${done ? '<div class="sub">上次读到</div>' : ''}</a>`;
+        h += `<a class="${done ? 'continue' : ''}" title="${esc(n)}" href="#/${enc(series)}/${enc(n)}">${esc(n)}${done ? '<div class="sub">上次读到</div>' : ''}</a>`;
       }
       h += '</div>';
     }
