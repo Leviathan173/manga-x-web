@@ -48,6 +48,7 @@ header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-sp
   <button class="btn sm" id="dir"></button>
   <button class="btn sm" id="prev" hidden>上一话</button>
   <button class="btn sm" id="next" hidden>下一话</button>
+  <button class="btn sm" id="logout" title="退出登录">退出</button>
 </header>
 <main class="wrap" id="app"><div class="msg">加载中…</div></main>
 <script>
@@ -106,7 +107,7 @@ async function renderHome(){
   app.innerHTML = '<div class="msg">加载中…</div>';
   try{
     const series = (await list([])).filter(e => e.type === 'directory').sort((a,b) => nat(a.name, b.name));
-    if (!series.length) { app.innerHTML = '<div class="msg">/srv/manga/books 下还没有漫画</div>'; return; }
+    if (!series.length) { app.innerHTML = '<div class="msg">暂无内容</div>'; return; }
     const last = getLast();
     let h = '<div class="list">';
     if (last) h += `<a class="continue" href="#/${enc(last.series)}/${enc(last.chapter)}"><b>继续阅读</b><div class="sub">${esc(last.series)} · ${esc(last.chapter)}</div></a>`;
@@ -292,6 +293,7 @@ $('mode').onclick = () => {
   }
 };
 $('dir').onclick = () => { setDir(getDir() === 'rtl' ? 'ltr' : 'rtl'); renderToggles(); };
+$('logout').onclick = () => { location.href = '/__logout'; };
 addEventListener('keydown', e => {
   if (!cur.chapter || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape'){ go([cur.series]); return; }

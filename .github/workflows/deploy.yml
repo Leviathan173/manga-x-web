@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - index.html
+      - login.html
       - .github/workflows/deploy.yml
   workflow_dispatch:
 
@@ -21,7 +22,9 @@ jobs:
           username: ${{ secrets.ECS_USER }}
           password: ${{ secrets.ECS_PASSWORD }}
           port: ${{ secrets.ECS_PORT }}
-          source: index.html
+          source: |
+            index.html
+            login.html
           target: /srv/manga
           overwrite: true
 
@@ -33,5 +36,8 @@ jobs:
           password: ${{ secrets.ECS_PASSWORD }}
           port: ${{ secrets.ECS_PORT }}
           script: |
-            md5sum /srv/manga/index.html
-            curl -sk https://127.0.0.1:6883/index.html -o /dev/null -w 'http=%{http_code}\n'
+            md5sum /srv/manga/index.html /srv/manga/login.html
+            # 已启用登录门：无 Cookie 时 index.html 必须 302 跳登录页，否则门失效要失败
+            code=$(curl -sk -A 'Mozilla/5.0' -o /dev/null -w '%{http_code}' https://127.0.0.1:6883/index.html)
+            echo "index.html http=$code"
+            [ "$code" = "302" ] || { echo "登录门失效: http=$code"; exit 1; }
