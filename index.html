@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>漫画</title>
+<style>
+:root{--bg:#111;--fg:#e6e6e6;--mut:#888;--acc:#4a9eff;--card:#1c1c1c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(17,17,17,.92);backdrop-filter:blur(6px);border-bottom:1px solid #2a2a2a}
+header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.btn{background:var(--card);border:1px solid #333;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;text-decoration:none;white-space:nowrap;color:var(--fg)}
+.btn:hover{border-color:var(--acc)}
+.btn:disabled{opacity:.35;cursor:default}
+.btn.sm{padding:5px 9px;font-size:13px}
+.wrap{max-width:900px;margin:0 auto;padding:14px}
+.wrap.reader-mode{padding:0;max-width:none}
+.list a{display:block;padding:14px 16px;margin:8px 0;background:var(--card);border:1px solid #2a2a2a;border-radius:10px;text-decoration:none;color:var(--fg)}
+.list a:hover{border-color:var(--acc)}
+.list .sub{color:var(--mut);font-size:13px;margin-top:2px}
+.list a.continue{border-color:#3d6b3d}
+.ghead{color:var(--mut);font-size:13px;font-weight:600;margin:18px 4px 6px}
+.ghead:first-child{margin-top:4px}
+.reader img{display:block;width:100%;height:auto;margin:0 auto;background:#000}
+.reader .nav{display:flex;justify-content:space-between;gap:10px;padding:18px 0 60px}
+.reader-mode .nav{padding:16px 16px 56px}
+.pager .stage{position:relative;height:calc(100vh - 54px);height:calc(100dvh - 54px);background:#000;overflow:hidden;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.pager .layer{position:absolute;inset:0;margin:auto;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;-webkit-user-drag:none}
+.spin{position:absolute;right:14px;bottom:14px;width:20px;height:20px;border:2px solid #444;border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;z-index:5}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pager .pnav{display:flex;align-items:center;justify-content:center;gap:16px;padding:12px 0}
+.pager .pind{color:var(--mut);font-variant-numeric:tabular-nums;min-width:74px;text-align:center}
+.msg{color:var(--mut);padding:60px 0;text-align:center}
+@media(max-width:560px){header{gap:4px;padding:8px 10px}.btn{padding:5px 8px;font-size:13px}}
+</style>
+</head>
+<body>
+<header>
+  <button class="btn" id="back" hidden>← 返回</button>
+  <div class="title" id="title">漫画</div>
+  <button class="btn sm" id="mode"></button>
+  <button class="btn sm" id="dir"></button>
+  <button class="btn sm" id="prev" hidden>上一话</button>
+  <button class="btn sm" id="next" hidden>下一话</button>
+</header>
+<main class="wrap" id="app"><div class="msg">加载中…</div></main>
+<script>
+const enc = encodeURIComponent;
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nat = (a, b) => a.localeCompare(b, 'zh', {numeric:true, sensitivity:'base'});
+const GROUPS = ['serial','volume','sp'];
+const GROUPLABEL = {serial:'普通连载话', volume:'单卷', sp:'SP'};
+const groupOf = n => /附录|动画化|特别|番外|sp/i.test(n) ? 'sp' : /卷/.test(n) ? 'volume' : 'serial';
+const sortChapters = names => names.sort((a,b) => GROUPS.indexOf(groupOf(a)) - GROUPS.indexOf(groupOf(b)) || nat(a,b));
+const isImg = n => /\.(jpe?g|png|webp|gif|avif)$/i.test(n);
+const app = document.getElementById('app');
+const $ = id => document.getElementById(id);
+let cur = {series:null, chapter:null, chapters:[], imgs:[], idx:0, page:0};
+let wantPage = null;
+let layers = [], front = 0, gen = [0, 0], spinT = null;
+
+const getMode = () => localStorage.getItem('manga:mode') || 'page';
+const setMode = m => localStorage.setItem('manga:mode', m);
+const getDir  = () => localStorage.getItem('manga:dir') || 'rtl';
+const setDir  = d => localStorage.setItem('manga:dir', d);
+const nextKey = () => getDir() === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
+const swipeIsNext = dx => getDir() === 'rtl' ? dx > 0 : dx < 0;
+
+function urlOf(segs){ return '/books/' + segs.map(enc).join('/') + (segs.length ? '/' : ''); }
+async function list(segs){
+  const r = await fetch(urlOf(segs), {cache:'no-store'});
+  if (!r.ok) throw new Error(urlOf(segs) + ' → HTTP ' + r.status);
+  return (await r.json()).filter(e => e.name && !e.name.startsWith('.'));
+}
+function go(segs){ location.hash = '/' + segs.map(enc).join('/'); }
+function getLast(){ try { const o = JSON.parse(localStorage.getItem('manga:last')); return (o && typeof o.series === 'string' && typeof o.chapter === 'string') ? o : null; } catch { return null; } }
+function setLast(series, chapter){ try { localStorage.setItem('manga:last', JSON.stringify({series, chapter})); } catch {} }
+function renderToggles(){
+  $('mode').textContent = getMode() === 'page' ? '单页' : '连续';
+  $('dir').textContent  = getDir() === 'rtl' ? '右→左' : '左→右';
+}
+function setBar(o){
+  $('title').textContent = o.title;
+  $('back').hidden = !o.back;
+  $('prev').hidden = !o.chapter;
+  $('next').hidden = !o.chapter;
+  $('prev').disabled = !(o.chapter && o.idx > 0);
+  $('next').disabled = !(o.chapter && o.idx >= 0 && o.idx < o.total - 1);
+  document.title = o.title;
+  renderToggles();
+}
+function fail(e){ app.innerHTML = '<div class="msg">加载失败：' + esc(String(e.message || e)) + '</div>'; }
+
+async function renderHome(){
+  app.className = 'wrap';
+  setBar({back:false, title:'漫画'});
+  app.innerHTML = '<div class="msg">加载中…</div>';
+  try{
+    const series = (await list([])).filter(e => e.type === 'directory').sort((a,b) => nat(a.name, b.name));
+    if (!series.length) { app.innerHTML = '<div class="msg">/srv/manga/books 下还没有漫画</div>'; return; }
+    const last = getLast();
+    let h = '<div class="list">';
+    if (last) h += `<a class="continue" href="#/${enc(last.series)}/${enc(last.chapter)}"><b>继续阅读</b><div class="sub">${esc(last.series)} · ${esc(last.chapter)}</div></a>`;
+    for (const e of series) h += `<a href="#/${enc(e.name)}">${esc(e.name)}</a>`;
+    app.innerHTML = h + '</div>';
+  }catch(e){ fail(e); }
+}
+
+async function renderSeries(series){
+  app.className = 'wrap';
+  setBar({back:true, title:series});
+  app.innerHTML = '<div class="msg">加载中…</div>';
+  try{
+    const chapters = (await list([series])).filter(e => e.type === 'directory').sort((a,b) => nat(a.name, b.name));
+    if (!chapters.length) { app.innerHTML = '<div class="msg">该系列下没有章节</div>'; return; }
+    const last = getLast();
+    const groups = {serial:[], volume:[], sp:[]};
+    for (const e of chapters) groups[groupOf(e.name)].push(e.name);
+    let h = '';
+    for (const k of GROUPS){
+      if (!groups[k].length) continue;
+      h += `<div class="ghead">${GROUPLABEL[k]}</div><div class="list">`;
+      for (const n of groups[k].sort(nat)){
+        const done = last && last.series === series && last.chapter === n;
+        h += `<a class="${done ? 'continue' : ''}" href="#/${enc(series)}/${enc(n)}">${esc(n)}${done ? '<div class="sub">上次读到</div>' : ''}</a>`;
+      }
+      h += '</div>';
+    }
+    app.innerHTML = h;
+  }catch(e){ fail(e); }
+}
+
+async function renderChapter(series, chapter){
+  app.className = 'wrap';
+  setBar({back:true, title:series + ' · ' + chapter});
+  app.innerHTML = '<div class="msg">加载中…</div>';
+  try{
+    cur.series = series; cur.chapter = chapter;
+    const [chapters, files] = await Promise.all([list([series]), list([series, chapter])]);
+    cur.chapters = sortChapters(chapters.filter(e => e.type === 'directory').map(e => e.name));
+    cur.imgs = files.filter(e => e.type === 'file' && isImg(e.name)).sort((a,b) => nat(a.name, b.name)).map(e => e.name);
+    if (cur.chapters.indexOf(chapter) < 0) cur.chapters.push(chapter);
+    cur.idx = cur.chapters.indexOf(chapter);
+    setBar({back:true, title:series + ' · ' + chapter, chapter, idx:cur.idx, total:cur.chapters.length});
+    if (!cur.imgs.length){ wantPage = null; app.innerHTML = '<div class="msg">本章没有图片</div>'; return; }
+    setLast(series, chapter);
+    if (getMode() === 'page') renderPages(); else renderScroll();
+  }catch(e){ wantPage = null; cur.imgs = []; cur.chapters = []; fail(e); }
+}
+
+function renderScroll(fromPage){
+  app.className = 'wrap';
+  const base = urlOf([cur.series, cur.chapter]);
+  let h = '<div class="reader">';
+  for (const n of cur.imgs) h += `<img loading="lazy" src="${base + enc(n)}" alt="">`;
+  h += '<div class="nav"><button class="btn" id="bp">← 上一话</button><button class="btn" id="bn">下一话 →</button></div></div>';
+  app.innerHTML = h;
+  const bp = $('bp'), bn = $('bn');
+  bp.disabled = cur.idx <= 0; bn.disabled = cur.idx >= cur.chapters.length - 1;
+  bp.onclick = () => navChapter(-1); bn.onclick = () => navChapter(1);
+  if (fromPage != null && app.querySelectorAll('.reader img')[fromPage]) app.querySelectorAll('.reader img')[fromPage].scrollIntoView({block:'center'});
+  else scrollTo(0, 0);
+}
+
+function renderPages(){
+  app.className = 'wrap reader-mode';
+  const start = wantPage === 'last' ? cur.imgs.length - 1 : (typeof wantPage === 'number' ? wantPage : 0);
+  wantPage = null;
+  app.innerHTML = `<div class="reader pager">
+    <div class="stage" id="stage">
+      <img class="layer" id="lay0" draggable="false" alt="">
+      <img class="layer" id="lay1" draggable="false" alt="">
+      <div class="spin" id="spin" hidden></div>
+    </div>
+    <div class="pnav">
+      <button class="btn" id="pp">上一页</button>
+      <span class="pind" id="pind"></span>
+      <button class="btn" id="pn">下一页</button>
+    </div>
+    <div class="nav"><button class="btn" id="bp">← 上一话</button><button class="btn" id="bn">下一话 →</button></div>
+  </div>`;
+  const bp = $('bp'), bn = $('bn');
+  bp.disabled = cur.idx <= 0; bn.disabled = cur.idx >= cur.chapters.length - 1;
+  bp.onclick = () => navChapter(-1); bn.onclick = () => navChapter(1);
+  $('pp').onclick = () => prevPage();
+  $('pn').onclick = () => nextPage();
+  layers = [$('lay0'), $('lay1')];
+  front = 0; gen = [0, 0];
+  layers[0].style.zIndex = 1; layers[1].style.zIndex = 1;
+  setupSwipe($('stage'));
+  showPage(start);
+}
+
+function showPage(n){
+  const total = cur.imgs.length;
+  if (!total) return;
+  cur.page = Math.min(Math.max(n, 0), total - 1);
+  const base = urlOf([cur.series, cur.chapter]);
+  const url = base + enc(cur.imgs[cur.page]);
+  const bi = 1 - front;
+  const back = layers[bi];
+  const my = ++gen[bi];
+  const spin = $('spin');
+  back.style.zIndex = 2; layers[front].style.zIndex = 1;
+  clearTimeout(spinT);
+  spinT = setTimeout(() => { if (gen[bi] === my) spin.hidden = false; }, 250);
+  back.onload = () => {
+    if (gen[bi] !== my) return;
+    clearTimeout(spinT); spin.hidden = true;
+    front = bi;
+    const old = layers[1 - bi];
+    old.style.zIndex = 0; layers[front].style.zIndex = 1;
+    old.removeAttribute('src');
+  };
+  back.onerror = () => { if (gen[bi] === my){ clearTimeout(spinT); spin.hidden = true; } };
+  back.src = url;
+  $('pind').textContent = (cur.page + 1) + ' / ' + total;
+  for (const d of [-1, 1]){ const i = cur.page + d; if (i >= 0 && i < total) new Image().src = base + enc(cur.imgs[i]); }
+}
+
+function nextPage(){
+  if (cur.page < cur.imgs.length - 1) showPage(cur.page + 1);
+  else navChapter(1, 0);
+}
+function prevPage(){
+  if (cur.page > 0) showPage(cur.page - 1);
+  else navChapter(-1, 'last');
+}
+
+function setupSwipe(el){
+  let x0 = 0, y0 = 0, id = null;
+  el.addEventListener('pointerdown', e => { id = e.pointerId; x0 = e.clientX; y0 = e.clientY; try { el.setPointerCapture(e.pointerId); } catch {} });
+  el.addEventListener('pointerup', e => {
+    if (e.pointerId !== id) return;
+    id = null;
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    if (swipeIsNext(dx)) nextPage(); else prevPage();
+  });
+  el.addEventListener('pointercancel', () => { id = null; });
+}
+
+function navChapter(delta, page){
+  if (!cur.series || !cur.chapters.length) return;
+  const n = cur.chapters[cur.idx + delta];
+  if (n == null) return;
+  if (page !== undefined) wantPage = page;
+  go([cur.series, n]);
+}
+
+function route(){
+  let segs;
+  try{ segs = (location.hash.slice(1) || '/').split('/').filter(Boolean).map(decodeURIComponent); }
+  catch{ segs = []; }
+  cur.series = segs[0] ?? null;
+  cur.chapter = segs[1] ?? null;
+  if (segs.length === 0) renderHome();
+  else if (segs.length === 1) renderSeries(segs[0]);
+  else renderChapter(segs[0], segs[1]);
+}
+addEventListener('hashchange', route);
+$('back').onclick = () => (cur.chapter ? go([cur.series]) : go([]));
+$('prev').onclick = () => navChapter(-1);
+$('next').onclick = () => navChapter(1);
+$('mode').onclick = () => {
+  const next = getMode() === 'page' ? 'scroll' : 'page';
+  setMode(next);
+  renderToggles();
+  if (!cur.chapter || !cur.imgs.length) return;
+  if (next === 'page'){
+    const imgs = [...app.querySelectorAll('.reader img')];
+    let page = 0, best = Infinity, c = innerHeight / 2;
+    imgs.forEach((im, i) => { const r = im.getBoundingClientRect(); const d = Math.abs((r.top + r.bottom) / 2 - c); if (d < best){ best = d; page = i; } });
+    wantPage = page;
+    renderPages();
+  } else {
+    renderScroll(cur.page);
+  }
+};
+$('dir').onclick = () => { setDir(getDir() === 'rtl' ? 'ltr' : 'rtl'); renderToggles(); };
+addEventListener('keydown', e => {
+  if (!cur.chapter || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape'){ go([cur.series]); return; }
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const isNext = e.key === nextKey();
+  if (getMode() === 'page'){ isNext ? nextPage() : prevPage(); }
+  else navChapter(isNext ? 1 : -1);
+});
+renderToggles();
+route();
+</script>
+</body>
+</html>
